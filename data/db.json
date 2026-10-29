@@ -1,0 +1,55 @@
+{
+  "articles": [
+    {
+      "id": "art-1",
+      "slug": "nextjs-caching-deep-dive",
+      "title": "Deep Dive into Next.js 16 App Router Caching",
+      "body": "The App Router fundamentally redesigns how server rendering and caching interact. Instead of rebuilding entire pages or serving purely dynamic responses on every hit, fine-grained tagged caching allows high-concurrency content consoles to scale efficiently. Reads are cached with tags, and writes invalidate only the specific tags affected.",
+      "tag": "performance",
+      "createdAt": "2026-10-28T13:43:59.433Z"
+    },
+    {
+      "id": "art-2",
+      "slug": "tag-based-invalidation-patterns",
+      "title": "High-Throughput Tag-Based Invalidation Strategies",
+      "body": "In modern content delivery networks and edge-rendering setups, tag-based cache invalidation (revalidateTag) guarantees that readers receive instant updates without triggering a full rebuild of the website or flushing unrelated cache entries.",
+      "tag": "architecture",
+      "createdAt": "2026-10-29T01:43:59.434Z"
+    },
+    {
+      "id": "art-3",
+      "slug": "streaming-and-suspense-at-scale",
+      "title": "Streaming React Server Components with Suspense",
+      "body": "When pages contain slow third-party integrations, comments, or analytics panels, streaming enables the core article to render and be readable in milliseconds while secondary panels resolve asynchronously over the wire.",
+      "tag": "engineering",
+      "createdAt": "2026-10-29T11:43:59.434Z"
+    }
+  ],
+  "comments": [
+    {
+      "id": "comm-1",
+      "articleSlug": "nextjs-caching-deep-dive",
+      "author": "Sarah Chen (Staff Engineer)",
+      "content": "Tagged invalidation with unstable_cache solved our stale-data problem across all edge nodes!",
+      "createdAt": "2026-10-29T08:43:59.434Z"
+    },
+    {
+      "id": "comm-2",
+      "articleSlug": "nextjs-caching-deep-dive",
+      "author": "Alex Rivera (SRE)",
+      "content": "The ability to stream slow panels while keeping core text instantly readable is a game changer for perceived performance.",
+      "createdAt": "2026-10-29T10:43:59.434Z"
+    },
+    {
+      "id": "comm-3",
+      "articleSlug": "tag-based-invalidation-patterns",
+      "author": "Marcus Vance",
+      "content": "Great breakdown. Tagging by entity slug and collection prevents entire site purges.",
+      "createdAt": "2026-10-29T12:43:59.434Z"
+    }
+  ],
+  "metrics": {
+    "rawDbReads": 2,
+    "rawDbWrites": 0
+  }
+}
