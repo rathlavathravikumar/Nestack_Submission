@@ -2,9 +2,9 @@
 
 > **Technical Assessment**: Nestack Revision 2  
 > **Candidate**: Ravi Kumar Rathlavath (`ravirathlavath79@gmail.com`)  
-> **Repository Name**: `RaviKumarRathlavath_Nestack_Submission`  
+> **Repository**: `https://github.com/rathlavathravikumar/Nestack_Submission`  
 > **Target Framework**: **Next.js 16.4.3** (App Router strictly, React 19, TypeScript)  
-> **Live Deployment Link**: `https://nextjs-content-console.vercel.app` *(or see deployment steps below)*
+> **Live Deployment Link**: `https://nestack-submission.vercel.app` *(or see deployment steps below)*
 
 ---
 
