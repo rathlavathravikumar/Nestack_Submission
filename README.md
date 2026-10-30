@@ -13,12 +13,6 @@ LIVE DEPLOYMENT: Not deployed (GitHub submission only)
 
 ---
 
-## Evaluation Contributors
-Per instructions, add the following contributors to the private repository:
-* `bishal@nestack.com`
-* `sannidhya@nestack.com`
-* `sanjay@nestack.com`
-
 ---
 
 ## 1. Overview
@@ -214,12 +208,12 @@ npm test
 
 The endpoint accepts only the `articles` tag. It returns 400 for malformed JSON, non-object bodies, missing tags, or tags outside this allowlist; authentication is checked first for valid object payloads. It never accepts credentials in a URL.
 
-## Deployment and private repository
+## Deployment
 
-1. Create a **private** GitHub repository named `ravi_Nestack_Submission` and push this folder without `.env.local` or the ZIP unless you intend to submit that snapshot.
-2. In GitHub repository settings, invite `bishal@nestack.com`, `sannidhya@nestack.com`, and `sanjay@nestack.com` with the requested review access.
+1. Keep `.env.local`, database credentials, and the ZIP snapshot out of the repository.
+2. Share the GitHub repository link through the assignment process.
 3. Create a PostgreSQL database with a provider that supports persistent connections or its serverless pooler. Apply `npm run db:migrate` and `npm run db:seed` using the provider URL.
-4. Import the private repository into Vercel. Set `DATABASE_URL`, `DATABASE_SSL`, and a strong random `REVALIDATION_SECRET` in the production environment. Set the database pool size to a provider-appropriate low value.
+4. If deploying later, import the repository into Vercel. Set `DATABASE_URL`, `DATABASE_SSL`, and a strong random `REVALIDATION_SECRET` in the production environment. Set the database pool size to a provider-appropriate low value.
 5. Deploy and verify `/articles`, publishing, and the API before adding a real deployment URL here.
 
 ## Known limitations and next improvements
