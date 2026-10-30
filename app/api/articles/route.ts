@@ -11,6 +11,10 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const tagFilter = searchParams.get('tag') || undefined;
 
+    if (tagFilter && !['engineering', 'performance', 'architecture'].includes(tagFilter.toLowerCase())) {
+      return NextResponse.json({ error: 'Unsupported article tag.' }, { status: 400 });
+    }
+
     const articles = await getCachedArticles(tagFilter);
 
     // Return article summaries as requested in the specification

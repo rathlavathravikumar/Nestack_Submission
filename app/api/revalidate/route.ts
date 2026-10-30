@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { revalidateTag } from 'next/cache';
-import { invalidationQueue } from '@/lib/recovery-queue';
+import { db } from '@/lib/storage';
 
 /**
  * Route Handler: POST /api/revalidate
@@ -13,39 +13,51 @@ import { invalidationQueue } from '@/lib/recovery-queue';
  */
 export async function POST(request: NextRequest) {
   try {
-    let body: { tag?: string; secret?: string } = {};
+    let body: unknown;
     try {
       body = await request.json();
     } catch {
-      return NextResponse.json(
-        { error: 'Bad Request: Invalid JSON body' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Bad Request: Invalid JSON body' }, { status: 400 });
     }
 
-    const { tag, secret } = body;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Bad Request: Expected a JSON object' }, { status: 400 });
+    }
+    const { tag, secret } = body as { tag?: unknown; secret?: unknown };
     const configuredSecret = process.env.REVALIDATION_SECRET;
 
     // Fail closed: If REVALIDATION_SECRET is not configured or secret doesn't match -> 401
-    if (!configuredSecret || !secret || secret !== configuredSecret) {
+    if (!configuredSecret?.trim() || typeof secret !== 'string' || !secret || secret !== configuredSecret) {
       return NextResponse.json(
         { error: 'Unauthorized: Invalid or missing secret' },
         { status: 401 }
       );
     }
 
-    if (!tag || typeof tag !== 'string') {
+    if (tag === undefined || tag === null || tag === '') {
+      return NextResponse.json({ error: 'Bad Request: Missing tag parameter' }, { status: 400 });
+    }
+    if (typeof tag !== 'string' || !['articles'].includes(tag)) {
       return NextResponse.json(
-        { error: 'Bad Request: Missing tag parameter' },
+        { error: 'Bad Request: Unsupported tag' },
         { status: 400 }
       );
     }
 
     // Perform targeted tag revalidation
-    revalidateTag(tag, 'default');
+    try {
+      revalidateTag(tag, 'default');
+    } catch {
+      console.error('[REVALIDATE] Tag invalidation failed');
+      return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    }
 
-    // Resolve any pending failure in the recovery queue
-    invalidationQueue.markResolved(tag);
+    try {
+      await db.resolveInvalidationsRaw();
+    } catch {
+      console.error('[REVALIDATE] Cache refreshed, but recovery records could not be resolved.');
+    }
+
 
     return NextResponse.json(
       {
@@ -55,7 +67,7 @@ export async function POST(request: NextRequest) {
       { status: 200 }
     );
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Server error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error('[REVALIDATE] Tag invalidation failed');
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

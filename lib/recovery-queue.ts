@@ -8,7 +8,7 @@ export interface InvalidationFailureRecord {
   resolved: boolean;
 }
 
-// Dead-letter queue stored in memory / system state for recovery
+// Local-development fallback only; production recovery records live in PostgreSQL.
 const deadLetterQueue: InvalidationFailureRecord[] = [];
 
 export const invalidationQueue = {

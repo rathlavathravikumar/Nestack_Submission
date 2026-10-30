@@ -1,7 +1,7 @@
 'use client';
 
 import { useActionState, useState } from 'react';
-import { publishArticle, PublishActionResult } from '@/actions/publish-article';
+import { publishArticle, PublishActionResult, recoverArticleInvalidation } from '@/actions/publish-article';
 import Link from 'next/link';
 
 export function PublishForm() {
@@ -10,33 +10,24 @@ export function PublishForm() {
     null
   );
 
-  const [simulateFailure, setSimulateFailure] = useState(false);
   const [revalidating, setRevalidating] = useState(false);
   const [recoverySuccess, setRecoverySuccess] = useState<string | null>(null);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
 
   // Recovery action triggered directly from publisher UI
   async function handleManualRecovery() {
     setRevalidating(true);
     setRecoverySuccess(null);
+    setRecoveryError(null);
     try {
-      const res = await fetch('/api/revalidate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tag: 'articles',
-          secret: 'nestack_super_secret_token_2026',
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setRecoverySuccess(`Successfully revalidated tag "${data.tag}". Readers now see the new article!`);
+      const result = await recoverArticleInvalidation(state?.article?.slug || '');
+      if (result.success) {
+        setRecoverySuccess('Successfully revalidated the article list and detail tags.');
       } else {
-        const err = await res.json();
-        alert(`Revalidation failed: ${err.error || res.statusText}`);
+        setRecoveryError(`${result.listInvalidated ? 'The article list was refreshed, but its detail cache was not. ' : ''}${result.error || 'Revalidation failed.'}`);
       }
     } catch (e: unknown) {
-      alert(`Network error during revalidation: ${e instanceof Error ? e.message : 'Unknown'}`);
+      setRecoveryError(e instanceof Error ? e.message : 'Revalidation failed.');
     } finally {
       setRevalidating(false);
     }
@@ -59,8 +50,8 @@ export function PublishForm() {
           </p>
 
           <div style={{ background: '#fffbeb', border: '1px solid #fef3c7', padding: '12px', borderRadius: '6px', marginBottom: '12px', fontSize: '13px' }}>
-            <div><strong>What the Reader sees:</strong> The cached <code>/articles</code> list remains unchanged until revalidation succeeds.</div>
-            <div style={{ marginTop: '4px' }}><strong>What the Publisher sees:</strong> This advisory panel; article persisted, with self-healing recovery available below.</div>
+            <div><strong>What readers may see:</strong> Cached article lists or pages may remain stale until revalidation succeeds.</div>
+            <div style={{ marginTop: '4px' }}><strong>Recovery:</strong> Retry the collection invalidation below, or retry the article-specific invalidation after the collection succeeds.</div>
           </div>
 
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -71,7 +62,7 @@ export function PublishForm() {
               className="btn btn-primary"
               style={{ fontSize: '13px', backgroundColor: '#d97706' }}
             >
-              {revalidating ? 'Triggering Revalidation...' : 'Recover: Force Revalidate Tag via API'}
+              {revalidating ? 'Triggering Revalidation...' : '              Recover: Revalidate Cached Article Tags'}
             </button>
 
             {state.article && (
@@ -90,6 +81,7 @@ export function PublishForm() {
               ✓ {recoverySuccess}
             </div>
           )}
+          {recoveryError && <div role="alert" className="banner banner-danger" style={{ marginTop: '12px', marginBottom: 0 }}>{recoveryError}</div>}
         </div>
       )}
 
@@ -140,44 +132,6 @@ export function PublishForm() {
               placeholder="Write the full content of the article..."
               className="form-textarea"
             />
-          </div>
-
-          {/* On-Demand Partial Failure Toggle */}
-          <div
-            style={{
-              padding: '14px',
-              backgroundColor: '#fff7ed',
-              border: '1px solid #ffedd5',
-              borderRadius: '6px',
-              marginBottom: '20px',
-            }}
-          >
-            <label
-              style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: '10px',
-                cursor: 'pointer',
-                fontSize: '13px',
-                color: '#9a3412',
-              }}
-            >
-              <input
-                type="checkbox"
-                name="simulateFailure"
-                checked={simulateFailure}
-                onChange={(e) => setSimulateFailure(e.target.checked)}
-                style={{ marginTop: '2px' }}
-              />
-              <div>
-                <strong>Simulate Invalidation Failure (Evaluation Requirement 4)</strong>
-                <p style={{ margin: '4px 0 0', color: '#c2410c', fontSize: '12px' }}>
-                  When checked, the Server Action safely writes to storage, but simulates a downstream
-                  cache revalidation failure. You will observe the publisher feedback, reader stale state,
-                  and recovery mechanism.
-                </p>
-              </div>
-            </label>
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

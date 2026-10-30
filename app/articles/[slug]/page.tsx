@@ -4,11 +4,12 @@ import { notFound } from 'next/navigation';
 import { getCachedArticleBySlug } from '@/lib/articles';
 import { Comments } from './comments';
 import { CommentsSkeleton } from '@/components/comments-skeleton';
-import { db } from '@/lib/storage';
 
 interface ArticleDetailPageProps {
   params: Promise<{ slug: string }>;
 }
+
+export const dynamicParams = true;
 
 export default async function ArticleDetailPage({ params }: ArticleDetailPageProps) {
   const { slug } = await params;
@@ -18,7 +19,6 @@ export default async function ArticleDetailPage({ params }: ArticleDetailPagePro
     notFound();
   }
 
-  const metrics = db.getMetricsRaw();
 
   return (
     <div>
@@ -36,9 +36,6 @@ export default async function ArticleDetailPage({ params }: ArticleDetailPagePro
             <span className="badge badge-cached">Cached RSC Detail</span>
             <span className="badge badge-tag">Tag: article:{slug}</span>
           </div>
-          <span style={{ fontSize: '12px', color: '#64748b' }}>
-            Total Underlying DB Reads: <strong>{metrics.rawDbReads}</strong>
-          </span>
         </div>
       </div>
 

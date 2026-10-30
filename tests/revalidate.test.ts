@@ -6,6 +6,7 @@ vi.mock('next/cache', () => ({
   revalidateTag: vi.fn(),
   unstable_cache: vi.fn((fn) => fn),
 }));
+vi.mock('@/lib/storage', () => ({ db: { resolveInvalidationsRaw: vi.fn().mockResolvedValue(undefined) } }));
 
 import { POST } from '@/app/api/revalidate/route';
 import { revalidateTag } from 'next/cache';
@@ -35,6 +36,14 @@ describe('POST /api/revalidate Route Handler', () => {
     const data = await res.json();
     expect(data.error).toMatch(/Unauthorized/i);
     expect(revalidateTag).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 for malformed JSON', async () => {
+    const req = new NextRequest('http://localhost:3000/api/revalidate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{',
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
   });
 
   it('returns 401 when provided secret does not match REVALIDATION_SECRET', async () => {
@@ -79,6 +88,35 @@ describe('POST /api/revalidate Route Handler', () => {
     const data = await res.json();
     expect(data.error).toMatch(/Missing tag/i);
     expect(revalidateTag).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 for tags outside the allowlist', async () => {
+    const req = new NextRequest('http://localhost:3000/api/revalidate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tag: 'layout', secret: 'valid-test-secret-123' }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    expect(revalidateTag).not.toHaveBeenCalled();
+  });
+
+  it('does not leak Next.js error details if revalidation throws', async () => {
+    vi.mocked(revalidateTag).mockImplementationOnce(() => { throw new Error('secret internal detail'); });
+    const req = new NextRequest('http://localhost:3000/api/revalidate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tag: 'articles', secret: 'valid-test-secret-123' }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: 'Internal server error' });
+  });
+
+  it('returns 400 for a non-object JSON body', async () => {
+    const req = new NextRequest('http://localhost:3000/api/revalidate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '[]',
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
   });
 
   it('returns 200 and revalidates tag when valid secret and tag are provided', async () => {

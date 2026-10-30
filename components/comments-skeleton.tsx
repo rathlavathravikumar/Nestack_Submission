@@ -3,8 +3,8 @@ export function CommentsSkeleton() {
     <div style={{ marginTop: '24px', borderTop: '1px solid #e2e8f0', paddingTop: '20px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
         <h3 style={{ fontSize: '18px', fontWeight: 600 }}>Comments</h3>
-        <span className="badge" style={{ backgroundColor: '#fef08a', color: '#854d0e' }}>
-          Streaming (2s delay simulation)...
+        <span className="badge" role="status" style={{ backgroundColor: '#fef08a', color: '#854d0e' }}>
+          Loading comments... (slow source simulation)
         </span>
       </div>
 

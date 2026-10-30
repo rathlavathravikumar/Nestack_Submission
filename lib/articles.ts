@@ -12,22 +12,26 @@ import { db, Article, Comment } from './storage';
  * 3. Hitting the same page twice serves from cache and does NOT trigger `db.getArticlesRaw()`.
  */
 
-export const getCachedArticles = unstable_cache(
-  async (tagFilter?: string): Promise<Article[]> => {
-    return db.getArticlesRaw(tagFilter);
-  },
-  ['articles-list'],
-  {
-    tags: ['articles'],
-  }
-);
+export const getCachedArticles = (tagFilter?: string): Promise<Article[]> => {
+  const key = tagFilter ? `articles-${tagFilter.toLowerCase()}` : 'articles-all';
+  const fetcher = unstable_cache(
+    async (filter?: string): Promise<Article[]> => {
+      return db.getArticlesRaw(filter);
+    },
+    ['articles-list', key],
+    {
+      tags: ['articles'],
+    }
+  );
+  return fetcher(tagFilter);
+};
 
-export const getCachedArticleBySlug = (slug: string) => {
+export const getCachedArticleBySlug = (slug: string): Promise<Article | null> => {
   const fetcher = unstable_cache(
     async (s: string): Promise<Article | null> => {
       return db.getArticleBySlugRaw(s);
     },
-    [`article-detail-${slug}`],
+    ['article-detail', slug],
     {
       tags: ['articles', `article:${slug}`],
     }

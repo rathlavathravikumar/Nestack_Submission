@@ -3,13 +3,41 @@
 import { revalidateTag } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { db, Article } from '@/lib/storage';
-import { invalidationQueue } from '@/lib/recovery-queue';
+
+export interface RecoveryActionResult {
+  success: boolean;
+  error?: string;
+  listInvalidated?: boolean;
+}
+
+export async function recoverArticleInvalidation(slug: string): Promise<RecoveryActionResult> {
+  try {
+    if (process.env.SIMULATE_INVALIDATION_FAILURE === 'true') {
+      throw new Error('Cache invalidation is currently disabled by the failure simulation flag.');
+    }
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) return { success: false, error: 'Invalid article slug.' };
+    revalidateTag('articles', 'default');
+    try {
+      revalidateTag(`article:${slug}`, 'default');
+    } catch (error) {
+      return { success: false, listInvalidated: true, error: error instanceof Error ? error.message : 'Article cache invalidation failed.' };
+    }
+    await db.resolveInvalidationsRaw(slug);
+    return { success: true, listInvalidated: true };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown cache invalidation error',
+    };
+  }
+}
 
 export interface PublishActionResult {
   success: boolean;
   partialFailure?: boolean;
   error?: string;
   article?: Article;
+  listInvalidated?: boolean;
 }
 
 export async function publishArticle(
@@ -19,13 +47,16 @@ export async function publishArticle(
   const title = (formData.get('title') as string)?.trim();
   const body = (formData.get('body') as string)?.trim();
   const tag = ((formData.get('tag') as string) || 'engineering').trim().toLowerCase();
-  const simulateFailureParam = formData.get('simulateFailure');
 
-  if (!title || !body) {
+  if (!title || !body || title.length > 160 || body.length > 20_000) {
     return {
       success: false,
-      error: 'Both title and body are required to publish an article.',
+      error: 'Enter a title (1-160 characters) and body (1-20,000 characters).',
     };
+  }
+
+  if (!/^(engineering|performance|architecture)$/.test(tag)) {
+    return { success: false, error: 'Choose a supported article topic.' };
   }
 
   // Derive URL-friendly slug
@@ -33,12 +64,12 @@ export async function publishArticle(
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)/g, '');
-  const slug = `${baseSlug || 'article'}-${Date.now().toString().slice(-4)}`;
+  const slug = `${baseSlug || 'article'}-${crypto.randomUUID().slice(0, 8)}`;
 
   // Step 1: Write article to persistent storage
   let savedArticle: Article;
   try {
-    savedArticle = db.insertArticleRaw({
+    savedArticle = await db.insertArticleRaw({
       title,
       slug,
       body,
@@ -53,13 +84,11 @@ export async function publishArticle(
   }
 
   // Step 2: Cache Invalidation (Can fail independently)
-  const shouldSimulateFailure =
-    simulateFailureParam === 'on' ||
-    simulateFailureParam === 'true' ||
-    process.env.SIMULATE_INVALIDATION_FAILURE === 'true';
+  const shouldSimulateFailure = process.env.SIMULATE_INVALIDATION_FAILURE === 'true';
 
   let invalidationFailed = false;
   let invalidationErrorMessage = '';
+  let listInvalidated = false;
 
   try {
     if (shouldSimulateFailure) {
@@ -70,6 +99,7 @@ export async function publishArticle(
 
     // Invalidate the article collection tag
     revalidateTag('articles', 'default');
+    listInvalidated = true;
     // Invalidate the individual article tag
     revalidateTag(`article:${savedArticle.slug}`, 'default');
   } catch (err: unknown) {
@@ -78,12 +108,11 @@ export async function publishArticle(
       err instanceof Error ? err.message : 'Unknown cache invalidation error';
 
     // System recovery: Log the failed invalidation to the dead-letter queue
-    invalidationQueue.enqueue({
-      tag: 'articles',
-      slug: savedArticle.slug,
-      articleId: savedArticle.id,
-      errorMessage: invalidationErrorMessage,
-    });
+    try {
+      await db.enqueueInvalidationRaw(savedArticle.slug, savedArticle.id);
+    } catch {
+      console.error('[PUBLISH] Could not persist invalidation recovery record.');
+    }
   }
 
   // Handle the Partial Failure Case
@@ -95,6 +124,7 @@ export async function publishArticle(
       partialFailure: true,
       error: invalidationErrorMessage,
       article: savedArticle,
+      listInvalidated,
     };
   }
 

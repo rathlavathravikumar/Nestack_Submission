@@ -1,9 +1,7 @@
 import Link from 'next/link';
 import { getCachedArticles } from '@/lib/articles';
-import { db } from '@/lib/storage';
-import { invalidationQueue } from '@/lib/recovery-queue';
 
-export const dynamic = 'force-static'; // Can be cached statically or revalidated on-demand
+// Server Component with tagged unstable_cache data layer
 
 interface ArticlesPageProps {
   searchParams: Promise<{ tag?: string }>;
@@ -12,20 +10,9 @@ interface ArticlesPageProps {
 export default async function ArticlesPage({ searchParams }: ArticlesPageProps) {
   const { tag } = await searchParams;
   const articles = await getCachedArticles(tag);
-  const metrics = db.getMetricsRaw();
-  const pendingFailures = invalidationQueue.getPending();
 
   return (
     <div>
-      {/* Pending Invalidation Warning (if any) */}
-      {pendingFailures.length > 0 && (
-        <div className="banner banner-warning">
-          <strong>⚠️ Stale Cache Advisory:</strong> There are {pendingFailures.length} pending cache
-          invalidation failure(s) recorded in the recovery dead-letter queue.
-          Readers may observe stale data until resolved via <code>POST /api/revalidate</code>.
-        </div>
-      )}
-
       {/* Caching Architecture Status Card */}
       <div className="card" style={{ backgroundColor: '#f8fafc', borderColor: '#cbd5e1' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
@@ -34,7 +21,7 @@ export default async function ArticlesPage({ searchParams }: ArticlesPageProps) 
               Tagged Cache Monitor (unstable_cache)
             </h3>
             <p style={{ fontSize: '13px', color: '#64748b' }}>
-              Tag: <code>articles</code> | Underlying Raw DB Reads: <strong>{metrics.rawDbReads}</strong>
+              Collection cache tag: <code>articles</code>
             </p>
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>

@@ -1,5 +1,8 @@
-import fs from 'fs';
-import path from 'path';
+import 'server-only';
+import path from 'node:path';
+import fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { pool } from './database';
 
 export interface Article {
   id: string;
@@ -18,162 +21,140 @@ export interface Comment {
   createdAt: string;
 }
 
-interface DatabaseSchema {
+export interface InvalidationRecord {
+  id: number;
+  articleSlug: string;
+  articleId: string;
+  createdAt: string;
+}
+
+interface LocalDatabase {
   articles: Article[];
   comments: Comment[];
-  metrics: {
-    rawDbReads: number;
-    rawDbWrites: number;
-  };
+  metrics?: { rawDbReads: number; rawDbWrites: number };
 }
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const DB_FILE = path.join(DATA_DIR, 'db.json');
-
-const INITIAL_ARTICLES: Article[] = [
-  {
-    id: 'art-1',
-    slug: 'nextjs-caching-deep-dive',
-    title: 'Deep Dive into Next.js 16 App Router Caching',
-    body: 'The App Router fundamentally redesigns how server rendering and caching interact. Instead of rebuilding entire pages or serving purely dynamic responses on every hit, fine-grained tagged caching allows high-concurrency content consoles to scale efficiently. Reads are cached with tags, and writes invalidate only the specific tags affected.',
-    tag: 'performance',
-    createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
-  },
-  {
-    id: 'art-2',
-    slug: 'tag-based-invalidation-patterns',
-    title: 'High-Throughput Tag-Based Invalidation Strategies',
-    body: 'In modern content delivery networks and edge-rendering setups, tag-based cache invalidation (revalidateTag) guarantees that readers receive instant updates without triggering a full rebuild of the website or flushing unrelated cache entries.',
-    tag: 'architecture',
-    createdAt: new Date(Date.now() - 3600000 * 12).toISOString(),
-  },
-  {
-    id: 'art-3',
-    slug: 'streaming-and-suspense-at-scale',
-    title: 'Streaming React Server Components with Suspense',
-    body: 'When pages contain slow third-party integrations, comments, or analytics panels, streaming enables the core article to render and be readable in milliseconds while secondary panels resolve asynchronously over the wire.',
-    tag: 'engineering',
-    createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-  },
-];
-
-const INITIAL_COMMENTS: Comment[] = [
-  {
-    id: 'comm-1',
-    articleSlug: 'nextjs-caching-deep-dive',
-    author: 'Sarah Chen (Staff Engineer)',
-    content: 'Tagged invalidation with unstable_cache solved our stale-data problem across all edge nodes!',
-    createdAt: new Date(Date.now() - 3600000 * 5).toISOString(),
-  },
-  {
-    id: 'comm-2',
-    articleSlug: 'nextjs-caching-deep-dive',
-    author: 'Alex Rivera (SRE)',
-    content: 'The ability to stream slow panels while keeping core text instantly readable is a game changer for perceived performance.',
-    createdAt: new Date(Date.now() - 3600000 * 3).toISOString(),
-  },
-  {
-    id: 'comm-3',
-    articleSlug: 'tag-based-invalidation-patterns',
-    author: 'Marcus Vance',
-    content: 'Great breakdown. Tagging by entity slug and collection prevents entire site purges.',
-    createdAt: new Date(Date.now() - 3600000 * 1).toISOString(),
-  },
-];
-
-function ensureDb(): DatabaseSchema {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-
-  if (!fs.existsSync(DB_FILE)) {
-    const initialData: DatabaseSchema = {
-      articles: INITIAL_ARTICLES,
-      comments: INITIAL_COMMENTS,
-      metrics: {
-        rawDbReads: 0,
-        rawDbWrites: 0,
-      },
-    };
-    fs.writeFileSync(DB_FILE, JSON.stringify(initialData, null, 2), 'utf-8');
-    return initialData;
-  }
-
-  try {
-    const content = fs.readFileSync(DB_FILE, 'utf-8');
-    return JSON.parse(content) as DatabaseSchema;
-  } catch {
-    const fallback: DatabaseSchema = {
-      articles: INITIAL_ARTICLES,
-      comments: INITIAL_COMMENTS,
-      metrics: { rawDbReads: 0, rawDbWrites: 0 },
-    };
-    fs.writeFileSync(DB_FILE, JSON.stringify(fallback, null, 2), 'utf-8');
-    return fallback;
-  }
+interface ArticleRow {
+  id: string;
+  slug: string;
+  title: string;
+  body: string;
+  tag: string;
+  created_at: Date | string;
 }
 
-function writeDb(data: DatabaseSchema): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
+interface CommentRow {
+  id: string;
+  article_slug: string;
+  author: string;
+  content: string;
+  created_at: Date | string;
 }
 
-/**
- * Underlying raw data source operations.
- * These methods directly perform disk I/O and track read/write counts.
- * When properly wrapped in Next.js caching primitives, calls here are intercepted on cache hits!
- */
+function toArticle(row: ArticleRow): Article {
+  return { id: row.id, slug: row.slug, title: row.title, body: row.body, tag: row.tag, createdAt: new Date(row.created_at).toISOString() };
+}
+
+function toComment(row: CommentRow): Comment {
+  return { id: row.id, articleSlug: row.article_slug, author: row.author, content: row.content, createdAt: new Date(row.created_at).toISOString() };
+}
+
+const dataFile = path.join(process.cwd(), 'data', 'db.json');
+let localData: LocalDatabase | undefined;
+
+function localDb(): LocalDatabase {
+  if (localData) return localData;
+  localData = JSON.parse(fs.readFileSync(dataFile, 'utf8')) as LocalDatabase;
+  localData.metrics ??= { rawDbReads: 0, rawDbWrites: 0 };
+  return localData;
+}
+
+const isPostgres = Boolean(process.env.DATABASE_URL);
+
+function postgres() {
+  if (!pool) throw new Error('DATABASE_URL is not configured.');
+  return pool;
+}
+
 export const db = {
-  getArticlesRaw(tagFilter?: string): Article[] {
-    const data = ensureDb();
-    data.metrics.rawDbReads += 1;
-    writeDb(data);
-    console.log(`[DATA SOURCE] Raw read triggered! Total raw reads: ${data.metrics.rawDbReads}`);
-
-    if (tagFilter) {
-      return data.articles.filter(
-        (a) => a.tag.toLowerCase() === tagFilter.toLowerCase()
-      );
+  async getArticlesRaw(tagFilter?: string): Promise<Article[]> {
+    if (isPostgres) {
+      const result = tagFilter
+        ? await postgres().query<ArticleRow>('SELECT * FROM articles WHERE lower(tag) = lower($1) ORDER BY created_at DESC', [tagFilter])
+        : await postgres().query<ArticleRow>('SELECT * FROM articles ORDER BY created_at DESC');
+      return result.rows.map(toArticle);
     }
-    return data.articles;
+    const data = localDb();
+    data.metrics!.rawDbReads += 1;
+    fs.writeFileSync(dataFile, JSON.stringify(data, null, 2), 'utf8');
+    return (tagFilter ? data.articles.filter((article) => article.tag.toLowerCase() === tagFilter.toLowerCase()) : data.articles).map((article) => ({ ...article }));
   },
 
-  getArticleBySlugRaw(slug: string): Article | null {
-    const data = ensureDb();
-    data.metrics.rawDbReads += 1;
-    writeDb(data);
-    console.log(`[DATA SOURCE] Raw read for slug "${slug}" triggered! Total raw reads: ${data.metrics.rawDbReads}`);
-
-    const found = data.articles.find((a) => a.slug === slug);
-    return found || null;
+  async getArticleBySlugRaw(slug: string): Promise<Article | null> {
+    if (isPostgres) {
+      const result = await postgres().query<ArticleRow>('SELECT * FROM articles WHERE slug = $1 LIMIT 1', [slug]);
+      return result.rows[0] ? toArticle(result.rows[0]) : null;
+    }
+    const local = localDb();
+    local.metrics!.rawDbReads += 1;
+    fs.writeFileSync(dataFile, JSON.stringify(local, null, 2), 'utf8');
+    const article = local.articles.find((item) => item.slug === slug);
+    return article ? { ...article } : null;
   },
 
-  insertArticleRaw(article: Omit<Article, 'id' | 'createdAt'>): Article {
-    const data = ensureDb();
-    data.metrics.rawDbWrites += 1;
-
-    const newArticle: Article = {
-      ...article,
-      id: `art-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-      createdAt: new Date().toISOString(),
-    };
-
-    // Prepend new article so it appears at top of lists
-    data.articles.unshift(newArticle);
-    writeDb(data);
-    console.log(`[DATA SOURCE] Raw write for article "${newArticle.slug}". Total raw writes: ${data.metrics.rawDbWrites}`);
-    return newArticle;
+  async insertArticleRaw(article: Omit<Article, 'id' | 'createdAt'>): Promise<Article> {
+    const id = `art-${randomUUID()}`;
+    if (isPostgres) {
+      const result = await postgres().query<ArticleRow>(
+        'INSERT INTO articles (id, slug, title, body, tag) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+        [id, article.slug, article.title, article.body, article.tag]
+      );
+      return toArticle(result.rows[0]);
+    }
+    const data = localDb();
+    if (data.articles.some((item) => item.slug === article.slug)) throw new Error('An article with this URL already exists.');
+    const saved = { ...article, id, createdAt: new Date().toISOString() };
+    data.articles.unshift(saved);
+    data.metrics!.rawDbWrites += 1;
+    fs.writeFileSync(dataFile, JSON.stringify(data, null, 2), 'utf8');
+    return saved;
   },
 
-  getCommentsForArticleRaw(slug: string): Comment[] {
-    const data = ensureDb();
-    return data.comments.filter((c) => c.articleSlug === slug);
+  async getCommentsForArticleRaw(slug: string): Promise<Comment[]> {
+    if (isPostgres) {
+      const result = await postgres().query<CommentRow>('SELECT * FROM comments WHERE article_slug = $1 ORDER BY created_at ASC', [slug]);
+      return result.rows.map(toComment);
+    }
+    return localDb().comments.filter((comment) => comment.articleSlug === slug).map((comment) => ({ ...comment }));
   },
 
-  getMetricsRaw(): { rawDbReads: number; rawDbWrites: number } {
-    const data = ensureDb();
-    return data.metrics;
+  async getMetricsRaw(): Promise<{ rawDbReads: number; rawDbWrites: number }> {
+    if (isPostgres) {
+      return { rawDbReads: 0, rawDbWrites: 0 };
+    }
+    return { ...(localDb().metrics ?? { rawDbReads: 0, rawDbWrites: 0 }) };
+  },
+
+  async enqueueInvalidationRaw(articleSlug: string, articleId: string): Promise<void> {
+    if (isPostgres) {
+      await postgres().query('INSERT INTO invalidation_outbox (article_slug, article_id) VALUES ($1, $2)', [articleSlug, articleId]);
+      return;
+    }
+    const data = localDb() as LocalDatabase & { invalidationOutbox?: InvalidationRecord[] };
+    data.invalidationOutbox ??= [];
+    data.invalidationOutbox.unshift({ id: Date.now(), articleSlug, articleId, createdAt: new Date().toISOString() });
+    fs.writeFileSync(dataFile, JSON.stringify(data, null, 2), 'utf8');
+  },
+
+  async resolveInvalidationsRaw(articleSlug?: string): Promise<void> {
+    if (isPostgres) {
+      await postgres().query('UPDATE invalidation_outbox SET resolved_at = now() WHERE resolved_at IS NULL AND ($1::text IS NULL OR article_slug = $1)', [articleSlug ?? null]);
+      return;
+    }
+    const data = localDb() as LocalDatabase & { invalidationOutbox?: (InvalidationRecord & { resolvedAt?: string })[] };
+    for (const entry of data.invalidationOutbox ?? []) {
+      if (!entry.resolvedAt && (!articleSlug || entry.articleSlug === articleSlug)) entry.resolvedAt = new Date().toISOString();
+    }
+    fs.writeFileSync(dataFile, JSON.stringify(data, null, 2), 'utf8');
   },
 };
